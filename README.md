@@ -1,1 +1,20 @@
-# Keival-ai
+settings.gradle.kts
+build.gradle.kts
+gradle.properties
+app/build.gradle.kts
+app/src/main/AndroidManifest.xml
+app/src/main/java/com/keival/ai/MainActivity.kt
+app/src/main/assets/index.html
+app/src/main/res/values/themes.xml
+app/src/main/res/drawable/ic_launcher.xml
+.github/workflows/build.yml
+settings.gradle.kts
+build.gradle.kts
+gradle.properties
+app/build.gradle.kts
+app/src/main/AndroidManifest.xml
+app/src/main/java/com/keival/ai/MainActivity.kt
+app/src/main/assets/index.html
+app/src/main/res/values/themes.xml
+app/src/main/res/drawable/ic_launcher.xml
+.github/workflows/build.yml
