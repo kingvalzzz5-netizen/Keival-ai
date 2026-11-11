@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KEIVAL AI</title>
+<style>
+:root{--bg:#f6f5fb;--surface:#fff;--text:#1d1b2e;--muted:#6d6a85;--accent:#6c4cff;--accent2:#22c1ff;--border:#e3e0f2}
+@media (prefers-color-scheme:dark){:root{--bg:#12111c;--surface:#1c1b2b;--text:#eeedf8;--muted:#9a97b5;--border:#2d2b42}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 4px}
+header div{text-align:center;flex:1}
+h1{font-size:18px;margin:0}
+header p{margin:2px 0 0;color:var(--muted);font-size:13px}
+#gear{width:40px;height:40px;border:0;background:none;font-size:22px;color:var(--text)}
+#sp{width:40px}
+#orbWrap{display:flex;justify-content:center;padding:8px 0}
+#orb{width:84px;height:84px;border-radius:50%;border:0;background:radial-gradient(circle at 30% 30%,var(--accent2),var(--accent));box-shadow:0 8px 24px rgba(108,76,255,.35);font-size:34px;color:#fff;animation:float 3.5s ease-in-out infinite;-webkit-tap-highlight-color:transparent}
+#orb:active{transform:scale(.88)}
+#orb.pulse{animation:pulse .6s ease-out}
+#orb.think{animation:spin 1s linear infinite}
+@keyframes float{50%{transform:translateY(-5px)}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,76,255,.6)}100%{box-shadow:0 0 0 38px rgba(108,76,255,0)}}
+@keyframes spin{50%{transform:scale(1.1) rotate(180deg)}100%{transform:rotate(360deg)}}
+#setup{display:none;margin:4px 14px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:14px;font-size:14px}
+#setup input{width:100%;margin:8px 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+#setup button{padding:9px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font:inherit}
+#chat{flex:1;overflow-y:auto;padding:8px 14px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:86%;padding:10px 14px;border-radius:18px;white-space:pre-wrap;overflow-wrap:anywhere;animation:in .2s}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:5px}
+.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;padding:4px 14px}
+.chip{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:999px;padding:8px 14px;font-size:14px}
+form{display:flex;gap:8px;padding:10px 12px 12px;align-items:flex-end}
+textarea{flex:1;resize:none;max-height:120px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:22px;padding:11px 16px;font:inherit;outline:none}
+textarea:focus{border-color:var(--accent)}
+#send{width:46px;height:46px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:20px}
+#send:disabled{opacity:.5}
+</style>
+</head>
+<body>
+<header>
+  <span id="sp"></span>
+  <div><h1>KEIVAL AI</h1><p>Tanya apa saja. Sentuh bola, atau ketik pertanyaanmu.</p></div>
+  <button id="gear" aria-label="Pengaturan">⚙</button>
+</header>
+<div id="setup">
+  Masukkan API key Anthropic kamu (dari console.anthropic.com). Key disimpan hanya di HP ini.
+  <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
+  <button id="saveKey">Simpan</button>
+</div>
+<div id="orbWrap"><button id="orb" aria-label="Sentuh KEIVAL AI">✦</button></div>
+<div id="chat" aria-live="polite"></div>
+<div class="chips" id="chips"></div>
+<form id="f">
+  <textarea id="q" rows="1" placeholder="Ketik pertanyaanmu di sini…" enterkeyhint="send"></textarea>
+  <button id="send" aria-label="Kirim">➤</button>
+</form>
+<script>
+const chat=document.getElementById('chat'),q=document.getElementById('q'),orb=document.getElementById('orb'),send=document.getElementById('send'),chips=document.getElementById('chips'),setup=document.getElementById('setup'),keyIn=document.getElementById('key');
+const history=[],pending={};let busy=false,nextId=1;
+const ideas=["Ceritakan fakta unik hari ini","Jelaskan AI dengan sederhana","Bantu saya buat ide bisnis","Beri saya semangat"];
+function add(t,c){const d=document.createElement('div');d.className='msg '+c;d.textContent=t;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
+function pulse(){orb.classList.remove('pulse');void orb.offsetWidth;orb.classList.add('pulse');try{navigator.vibrate&&navigator.vibrate(15)}catch(e){}}
+function hasKey(){try{return !!Android.getKey()}catch(e){return false}}
+add("Halo! Saya KEIVAL AI. Sentuh bola di atas, pilih saran, atau ketik pertanyaan apa saja.","ai");
+if(!hasKey())setup.style.display='block';
+document.getElementById('gear').onclick=()=>{setup.style.display=setup.style.display==='block'?'none':'block'};
+document.getElementById('saveKey').onclick=()=>{try{Android.setKey(keyIn.value);keyIn.value='';setup.style.display='none';add("API key tersimpan. Silakan bertanya!","ai")}catch(e){}};
+ideas.forEach(i=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=i;b.onclick=()=>{pulse();ask(i)};chips.appendChild(b)});
+orb.onclick=()=>{pulse();if(!q.value.trim()){q.focus();q.placeholder="Coba: "+ideas[Math.floor(Math.random()*ideas.length)]}else{ask(q.value)}};
+function ask(text){
+  text=text.trim();if(!text||busy)return;
+  if(!hasKey()){setup.style.display='block';return}
+  chips.style.display='none';q.value='';q.style.height='auto';
+  add(text,'me');history.push({role:'user',content:text});
+  const out=add('…','ai'),id=nextId++;pending[id]=out;
+  busy=true;send.disabled=true;orb.classList.add('think');
+  Android.ask(id,JSON.stringify(history));
+}
+window.onAnswer=function(id,text,err){
+  const out=pending[id];delete pending[id];
+  if(err){out.textContent="Maaf: "+err;history.pop()}
+  else{out.textContent=text;history.push({role:'assistant',content:text})}
+  busy=false;send.disabled=false;orb.classList.remove('think');chat.scrollTop=chat.scrollHeight;
+};
+document.getElementById('f').onsubmit=e=>{e.preventDefault();ask(q.value)};
+q.addEventListener('input',()=>{q.style.height='auto';q.style.height=Math.min(q.scrollHeight,120)+'px'});
+</script>
+</body>
+</html>
