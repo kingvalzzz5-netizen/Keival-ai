@@ -1,0 +1,428 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "KeivalAI"
+include(":app")
+
+plugins {
+    id("com.android.application") version "8.5.2" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+}
+
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+android.nonTransitiveRClass=true
+
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.keival.ai"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.keival.ai"
+        minSdk = 24
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="KEIVAL AI"
+        android:theme="@style/AppTheme">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+
+package com.keival.ai
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+
+class MainActivity : Activity() {
+
+    private lateinit var web: WebView
+    private var recognizer: SpeechRecognizer? = null
+    private var pendingLang = "id-ID"
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        web = WebView(this)
+        setContentView(web)
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.addJavascriptInterface(Bridge(), "Android")
+        web.loadUrl("file:///android_asset/index.html")
+    }
+
+    override fun onBackPressed() {
+        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+        recognizer?.destroy()
+        super.onDestroy()
+    }
+
+    private fun js(code: String) {
+        runOnUiThread { web.evaluateJavascript(code, null) }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                beginListening(pendingLang)
+            } else {
+                js("onMicState('denied')")
+            }
+        }
+    }
+
+    private fun beginListening(lang: String) {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            js("onMicState('unavailable')")
+            return
+        }
+        recognizer?.destroy()
+        val r = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer = r
+        r.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) { js("onMicState('listening')") }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() { js("onMicState('idle')") }
+            override fun onError(error: Int) { js("onMicState('error')") }
+            override fun onResults(results: Bundle?) {
+                val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
+                js("onMicResult(${JSONObject.quote(t)},true)")
+                js("onMicState('idle')")
+            }
+            override fun onPartialResults(partialResults: Bundle?) {
+                val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
+                js("onMicResult(${JSONObject.quote(t)},false)")
+            }
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        r.startListening(intent)
+    }
+
+    inner class Bridge {
+        private val prefs = getSharedPreferences("keival", Context.MODE_PRIVATE)
+
+        @JavascriptInterface
+        fun getKey(): String = prefs.getString("key", "") ?: ""
+
+        @JavascriptInterface
+        fun setKey(key: String) {
+            prefs.edit().putString("key", key.trim()).apply()
+        }
+
+        @JavascriptInterface
+        fun startMic(lang: String) {
+            runOnUiThread {
+                pendingLang = lang
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                } else {
+                    beginListening(lang)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopMic() {
+            runOnUiThread { recognizer?.stopListening() }
+        }
+
+        @JavascriptInterface
+        fun ask(id: Int, messagesJson: String, lang: String) {
+            Thread {
+                var text = ""
+                var err = ""
+                try {
+                    val key = getKey()
+                    if (key.isEmpty()) throw Exception(if (lang == "en") "API key is empty. Tap ⚙ to add it." else "API key belum diisi. Ketuk ikon ⚙ untuk mengisinya.")
+                    val system = SYSTEM_PROMPT + if (lang == "en") " Always reply in English." else " Selalu jawab dalam bahasa Indonesia."
+                    val body = JSONObject()
+                        .put("model", MODEL)
+                        .put("max_tokens", 1024)
+                        .put("system", system)
+                        .put("messages", JSONArray(messagesJson))
+                    val conn = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.connectTimeout = 20000
+                    conn.readTimeout = 60000
+                    conn.doOutput = true
+                    conn.setRequestProperty("content-type", "application/json")
+                    conn.setRequestProperty("x-api-key", key)
+                    conn.setRequestProperty("anthropic-version", "2023-06-01")
+                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val raw = stream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(raw)
+                    if (code in 200..299) {
+                        val content = json.getJSONArray("content")
+                        val sb = StringBuilder()
+                        for (i in 0 until content.length()) {
+                            val block = content.getJSONObject(i)
+                            if (block.optString("type") == "text") sb.append(block.getString("text"))
+                        }
+                        text = sb.toString()
+                    } else {
+                        err = json.optJSONObject("error")?.optString("message") ?: "Error $code"
+                    }
+                } catch (e: Exception) {
+                    err = e.message ?: "Network error."
+                }
+                js("onAnswer($id,${JSONObject.quote(text)},${JSONObject.quote(err)})")
+            }.start()
+        }
+    }
+
+    companion object {
+        const val MODEL = "claude-sonnet-5-5"
+        const val SYSTEM_PROMPT =
+            "Kamu adalah KEIVAL AI, asisten AI yang ramah dan membantu menjawab pertanyaan tentang apa saja. " +
+            "Jawab singkat, jelas, dan akurat. Jika tidak yakin, katakan terus terang."
+    }
+}
+
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#6C4CFF</item>
+        <item name="android:navigationBarColor">#12111C</item>
+    </style>
+</resources>
+
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#6C4CFF" android:pathData="M54,54m-54,0a54,54 0,1 1,108 0a54,54 0,1 1,-108 0" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,22 L62,46 L86,54 L62,62 L54,86 L46,62 L22,54 L46,46 Z" />
+</vector>
+
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - run: gradle assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KEIVAL-AI-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+          <!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KEIVAL AI</title>
+<style>
+:root{--bg:#f4f2ff;--surface:#fff;--text:#1d1b2e;--muted:#6d6a85;--accent:#6c4cff;--accent2:#22c1ff;--border:#e3e0f2}
+@media (prefers-color-scheme:dark){:root{--bg:#0f0e19;--surface:#1b1a2a;--text:#eeedf8;--muted:#9a97b5;--border:#2d2b42}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:radial-gradient(circle at 50% -10%,rgba(108,76,255,.25),transparent 55%),var(--bg);color:var(--text);font:16px/1.5 system-ui,sans-serif;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 4px}
+header div{text-align:center;flex:1}
+h1{font-size:19px;margin:0;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:.5px}
+header p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.hb{min-width:42px;height:38px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:12px;font:600 14px system-ui;padding:0 10px}
+#orbWrap{display:flex;justify-content:center;padding:8px 0;filter:drop-shadow(0 8px 14px rgba(108,76,255,.45))}
+#orb{width:104px;height:104px;border:0;background:linear-gradient(135deg,var(--accent2),var(--accent));clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);font-size:0;animation:float 3.5s ease-in-out infinite;-webkit-tap-highlight-color:transparent}
+#orb:active{transform:scale(.88)}
+#orb.pulse{animation:pulse .6s ease-out}
+#orb.think{animation:spin 1s linear infinite}
+@keyframes float{50%{transform:translateY(-5px)}}
+@keyframes pulse{0%{transform:scale(1)}50%{transform:scale(1.3) rotate(20deg)}100%{transform:scale(1)}}
+@keyframes spin{50%{transform:scale(1.1) rotate(180deg)}100%{transform:rotate(360deg)}}
+#setup{display:none;margin:4px 14px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:14px;font-size:14px}
+#setup input{width:100%;margin:8px 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+#saveKey{padding:9px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;font:inherit}
+#chat{flex:1;overflow-y:auto;padding:8px 14px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:86%;padding:10px 14px;border-radius:18px;white-space:pre-wrap;overflow-wrap:anywhere;animation:in .2s}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.me{align-self:flex-end;background:linear-gradient(135deg,var(--accent),#8a5cff);color:#fff;border-bottom-right-radius:5px}
+.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;padding:4px 14px}
+.chip{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:999px;padding:8px 14px;font-size:14px}
+form{display:flex;gap:8px;padding:10px 12px 12px;align-items:flex-end}
+textarea{flex:1;resize:none;max-height:120px;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:22px;padding:11px 16px;font:inherit;outline:none}
+textarea:focus{border-color:var(--accent)}
+.rb{width:46px;height:46px;border-radius:50%;border:0;font-size:20px;flex:none}
+#send{background:var(--accent);color:#fff}
+#send:disabled{opacity:.5}
+#mic{background:var(--surface);color:var(--text);border:1px solid var(--border)}
+#mic.on{background:#e5484d;color:#fff;animation:pulse2 1.2s infinite}
+@keyframes pulse2{0%{box-shadow:0 0 0 0 rgba(229,72,77,.6)}100%{box-shadow:0 0 0 16px rgba(229,72,77,0)}}
+</style>
+</head>
+<body>
+<header>
+  <button class="hb" id="lang" aria-label="Language">ID</button>
+  <div><h1>KEIVAL AI</h1><p id="sub"></p></div>
+  <button class="hb" id="gear" aria-label="Settings">⚙</button>
+</header>
+<div id="setup">
+  <span id="setupText"></span>
+  <input id="key" type="password" placeholder="sk-ant-..." autocomplete="off">
+  <button id="saveKey"></button>
+</div>
+<div id="orbWrap"><button id="orb" aria-label="KEIVAL AI">✦</button></div>
+<div id="chat" aria-live="polite"></div>
+<div class="chips" id="chips"></div>
+<form id="f">
+  <button type="button" class="rb" id="mic" aria-label="Mic">🎤</button>
+  <textarea id="q" rows="1" enterkeyhint="send"></textarea>
+  <button class="rb" id="send" aria-label="Send">➤</button>
+</form>
+<script>
+const $=id=>document.getElementById(id);
+const chat=$('chat'),q=$('q'),orb=$('orb'),send=$('send'),chips=$('chips'),setup=$('setup'),keyIn=$('key'),mic=$('mic'),langBtn=$('lang');
+const T={
+id:{sub:"Tanya apa saja. Sentuh bintang, ketik, atau bicara.",ph:"Ketik pertanyaanmu di sini…",hello:"Halo! Saya KEIVAL AI. Sentuh bintang, pilih saran, ketik, atau tekan 🎤 untuk bicara.",
+ideas:["Ceritakan fakta unik hari ini","Jelaskan AI dengan sederhana","Bantu saya buat ide bisnis","Beri saya semangat"],
+setup:"Masukkan API key Anthropic kamu (dari console.anthropic.com). Key disimpan hanya di HP ini.",save:"Simpan",saved:"API key tersimpan. Silakan bertanya!",try:"Coba: ",err:"Maaf: ",
+denied:"Izin mikrofon ditolak. Aktifkan lewat pengaturan HP.",na:"Pengenalan suara tidak tersedia di HP ini.",micErr:"Suara tidak terdengar. Coba lagi.",listen:"Mendengarkan…"},
+en:{sub:"Ask me anything. Tap the star, type, or speak.",ph:"Type your question here…",hello:"Hello! I'm KEIVAL AI. Tap the star, pick a suggestion, type, or press 🎤 to speak.",
+ideas:["Tell me a fun fact today","Explain AI in simple words","Help me with a business idea","Cheer me up"],
+setup:"Enter your Anthropic API key (from console.anthropic.com). It is stored only on this phone.",save:"Save",saved:"API key saved. Ask me anything!",try:"Try: ",err:"Sorry: ",
+denied:"Microphone permission denied. Enable it in phone settings.",na:"Speech recognition isn't available on this phone.",micErr:"Couldn't hear you. Try again.",listen:"Listening…"}};
+const SR={id:"id-ID",en:"en-US"};
+let lang=localStorage.getItem('lang')||'id',busy=false,micOn=false,nextId=1;
+const history=[],pending={};
+const t=()=>T[lang];
+function add(x,c){const d=document.createElement('div');d.className='msg '+c;d.textContent=x;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
+function pulse(){orb.classList.remove('pulse');void orb.offsetWidth;orb.classList.add('pulse');try{navigator.vibrate&&navigator.vibrate(15)}catch(e){}}
+function hasKey(){try{return !!Android.getKey()}catch(e){return false}}
+const welcome=add('','ai');
+function renderChips(){chips.innerHTML='';t().ideas.forEach(i=>{const b=document.createElement('button');b.type='button';b.className='chip';b.textContent=i;b.onclick=()=>{pulse();ask(i)};chips.appendChild(b)})}
+function applyLang(){
+  document.documentElement.lang=lang;langBtn.textContent=lang.toUpperCase();
+  $('sub').textContent=t().sub;q.placeholder=t().ph;$('setupText').textContent=t().setup;$('saveKey').textContent=t().save;
+  if(!history.length){welcome.textContent=t().hello;renderChips()}
+}
+langBtn.onclick=()=>{if(micOn){try{Android.stopMic()}catch(e){}}lang=lang==='id'?'en':'id';try{localStorage.setItem('lang',lang)}catch(e){}applyLang()};
+applyLang();
+if(!hasKey())setup.style.display='block';
+$('gear').onclick=()=>{setup.style.display=setup.style.display==='block'?'none':'block'};
+$('saveKey').onclick=()=>{try{Android.setKey(keyIn.value);keyIn.value='';setup.style.display='none';add(t().saved,'ai')}catch(e){}};
+orb.onclick=()=>{pulse();if(!q.value.trim()){q.focus();q.placeholder=t().try+t().ideas[Math.floor(Math.random()*4)]}else ask(q.value)};
+mic.onclick=()=>{try{micOn?Android.stopMic():Android.startMic(SR[lang])}catch(e){}};
+window.onMicState=s=>{
+  micOn=s==='listening';mic.classList.toggle('on',micOn);
+  if(micOn)q.placeholder=t().listen;else q.placeholder=t().ph;
+  if(s==='denied')add(t().denied,'ai');
+  if(s==='unavailable')add(t().na,'ai');
+  if(s==='error')add(t().micErr,'ai');
+};
+window.onMicResult=(text,final)=>{q.value=text;q.style.height='auto';q.style.height=Math.min(q.scrollHeight,120)+'px';if(final)q.focus()};
+function ask(text){
+  text=text.trim();if(!text||busy)return;
+  if(!hasKey()){setup.style.display='block';return}
+  chips.style.display='none';q.value='';q.style.height='auto';
+  add(text,'me');history.push({role:'user',content:text});
+  const out=add('…','ai'),id=nextId++;pending[id]=out;
+  busy=true;send.disabled=true;orb.classList.add('think');
+  Android.ask(id,JSON.stringify(history),lang);
+}
+window.onAnswer=function(id,text,err){
+  const out=pending[id];delete pending[id];
+  if(err){out.textContent=t().err+err;history.pop()}
+  else{out.textContent=text;history.push({role:'assistant',content:text})}
+  busy=false;send.disabled=false;orb.classList.remove('think');chat.scrollTop=chat.scrollHeight;
+};
+$('f').onsubmit=e=>{e.preventDefault();ask(q.value)};
+q.addEventListener('input',()=>{q.style.height='auto';q.style.height=Math.min(q.scrollHeight,120)+'px'});
+</script>
+</body>
+</html>
